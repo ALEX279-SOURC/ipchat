@@ -9,7 +9,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; }
+    body { background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
     
     /* Login Modal */
     #auth-screen { position: fixed; inset: 0; background: #0d1117; display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
@@ -17,14 +17,14 @@
     .auth-card input { width: 100%; padding: 10px; margin: 10px 0; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 4px; outline: none; }
     
     /* Header */
-    header { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; }
+    header { background: #161b22; border-bottom: 1px solid #30363d; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; }
     .user-info { display: flex; align-items: center; gap: 8px; font-size: 14px; }
-    .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #8b949e; }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #8b949e; display: inline-block; }
     .status-online { background: #2ea043; }
     
     /* Room Controls */
     .controls { background: #161b22; padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid #30363d; font-size: 13px; align-items: center; }
-    .controls input { padding: 6px 10px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 4px; width: 130px; outline: none; }
+    .controls input { padding: 6px 10px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 4px; width: 120px; outline: none; }
     
     button { background: #238636; color: white; border: none; padding: 7px 12px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 13px; }
     button:hover { background: #2ea043; }
@@ -32,6 +32,8 @@
     .btn-secondary:hover { background: #30363d; }
     .btn-share { background: #1f6feb; }
     .btn-share:hover { background: #388bfd; }
+    .btn-users { background: #30363d; padding: 6px 10px; font-size: 14px; display: flex; align-items: center; gap: 4px; }
+    .btn-users:hover { background: #484f58; }
 
     /* Chat Area */
     #chat-box { flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; background: #010409; }
@@ -44,6 +46,15 @@
     /* Footer */
     form { display: flex; padding: 12px; background: #161b22; border-top: 1px solid #30363d; gap: 8px; }
     form input { flex: 1; padding: 10px 14px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 4px; outline: none; }
+
+    /* Members Modal Popup */
+    #users-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 50; align-items: center; justify-content: center; padding: 15px; }
+    .users-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; width: 100%; max-width: 320px; overflow: hidden; }
+    .users-card-header { padding: 12px 16px; border-bottom: 1px solid #30363d; display: flex; justify-content: space-between; align-items: center; }
+    .users-list { max-height: 250px; overflow-y: auto; padding: 10px 16px; display: flex; flex-direction: column; gap: 10px; }
+    .user-row { display: flex; align-items: center; justify-content: space-between; font-size: 14px; }
+    .user-left { display: flex; align-items: center; gap: 8px; }
+    .badge-admin { background: #d29922; color: black; font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 10px; }
   </style>
 </head>
 <body>
@@ -58,15 +69,26 @@
     </div>
   </div>
 
+  <!-- Connected Users Popup Modal -->
+  <div id="users-modal" onclick="closeUsersModal(event)">
+    <div class="users-card" onclick="event.stopPropagation()">
+      <div class="users-card-header">
+        <strong>Room Members 👥</strong>
+        <span style="cursor: pointer; font-size: 18px;" onclick="toggleUsersModal()">✕</span>
+      </div>
+      <div class="users-list" id="users-list-container">
+        <span style="font-size: 12px; color: #8b949e;">Connecting room...</span>
+      </div>
+    </div>
+  </div>
+
   <header>
     <div class="user-info">
       <span class="status-dot status-online"></span>
       <strong id="display-user">User</strong>
     </div>
-    <div class="user-info">
-      <span>Peer:</span>
-      <span id="peer-status-dot" class="status-dot"></span>
-      <span id="peer-status-text" style="font-size: 12px;">Offline</span>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <button class="btn-users" onclick="toggleUsersModal()">👥 <span id="user-count-badge">0</span></button>
     </div>
   </header>
 
@@ -98,12 +120,12 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
-    // Check URL parameters for direct room invite link
     const urlParams = new URLSearchParams(window.location.search);
     const urlRoom = urlParams.get('room');
 
     let currentUser = localStorage.getItem("chat_username") || "";
     let activeRoom = urlRoom || localStorage.getItem("chat_room") || "";
+    let roomAdmin = "";
     let messagesListener = null;
 
     const chatBox = document.getElementById("chat-box");
@@ -130,6 +152,15 @@
       chatBox.scrollTop = chatBox.scrollHeight;
     }
 
+    function toggleUsersModal() {
+      const modal = document.getElementById("users-modal");
+      modal.style.display = (modal.style.display === "flex") ? "none" : "flex";
+    }
+
+    function closeUsersModal(e) {
+      document.getElementById("users-modal").style.display = "none";
+    }
+
     function handleLogin() {
       const val = document.getElementById("username-input").value.trim();
       if (!val) return alert("Username required!");
@@ -139,19 +170,16 @@
       document.getElementById("auth-screen").style.display = "none";
       document.getElementById("display-user").textContent = currentUser;
 
-      // Agar URL se invite link aayi hai ya purana room saved hai toh auto-connect karein
       if (activeRoom) {
         document.getElementById("room-code-input").value = activeRoom;
         joinRoom();
       }
     }
 
-    // Auto-login check
     if (currentUser) {
       document.getElementById("username-input").value = currentUser;
       handleLogin();
     } else if (urlRoom) {
-      // Invite link se aaya hai par username nahi hai toh modal open rakhein
       document.getElementById("room-code-input").value = urlRoom;
     }
 
@@ -178,14 +206,12 @@
         alert("Pehle 'New Code' dabayein ya Code likhein!");
         return;
       }
-
-      // Base URL without existing query params
       const baseUrl = window.location.origin + window.location.pathname;
       const shareUrl = `${baseUrl}?room=${room}`;
 
       if (navigator.share) {
         navigator.share({
-          title: 'Join My P2P Chat Room',
+          title: 'Join My Chat Room',
           text: `Mere sath direct chat room mein judo: Room Code ${room}`,
           url: shareUrl
         }).catch(() => {});
@@ -195,7 +221,7 @@
       }
     }
 
-    function joinRoom() {
+    async function joinRoom() {
       const room = document.getElementById("room-code-input").value.trim();
       if (!room) return alert("Pehle 4-Digit Room Code daalein!");
 
@@ -206,43 +232,78 @@
 
       const roomRef = db.ref(`/rooms/${room}`);
 
-      // Peer Online / Offline Tracking
-      roomRef.child("users").on("value", (snap) => {
-        const users = snap.val() || {};
-        const peers = Object.keys(users).filter(u => u !== currentUser);
-        if (peers.length > 0) {
-          const peerName = peers[0];
-          db.ref(`/status/${peerName}`).on("value", (s) => {
-            const data = s.val();
-            const dot = document.getElementById("peer-status-dot");
-            const txt = document.getElementById("peer-status-text");
-            if (data && data.state === "online") {
-              dot.className = "status-dot status-online";
-              txt.textContent = `${peerName} (Online)`;
-            } else {
-              dot.className = "status-dot";
-              txt.textContent = `${peerName} (Offline)`;
-            }
-          });
-        } else {
-          document.getElementById("peer-status-dot").className = "status-dot";
-          document.getElementById("peer-status-text").textContent = "Offline";
-        }
+      // Check ya assign Room Admin
+      const adminSnap = await roomRef.child("admin").once("value");
+      if (!adminSnap.exists()) {
+        await roomRef.child("admin").set(currentUser);
+        roomAdmin = currentUser;
+      } else {
+        roomAdmin = adminSnap.val();
+      }
+
+      // Live Track Admin
+      roomRef.child("admin").on("value", (s) => {
+        if (s.exists()) roomAdmin = s.val();
       });
 
-      // Join room presence
+      // User presence inside room
       roomRef.child(`users/${currentUser}`).set(true);
       roomRef.child(`users/${currentUser}`).onDisconnect().remove();
 
-      // Realtime Database Message Synchronization
-      if (messagesListener) {
-        messagesListener.off();
-      }
-      
+      // Listen for Room Members and Status
+      roomRef.child("users").on("value", (snap) => {
+        const users = snap.val() || {};
+        const userList = Object.keys(users);
+        document.getElementById("user-count-badge").textContent = userList.length;
+
+        const container = document.getElementById("users-list-container");
+        container.innerHTML = "";
+
+        userList.forEach(uname => {
+          const isAdmin = uname === roomAdmin;
+          const emoji = isAdmin ? "👑" : "🎭";
+          
+          const row = document.createElement("div");
+          row.className = "user-row";
+          row.id = `user-row-${uname}`;
+          row.innerHTML = `
+            <div class="user-left">
+              <span>${emoji}</span>
+              <strong>${uname} ${uname === currentUser ? "(You)" : ""}</strong>
+              ${isAdmin ? '<span class="badge-admin">Admin</span>' : ''}
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span id="dot-${uname}" class="status-dot"></span>
+              <span id="txt-${uname}" style="font-size: 11px; color: #8b949e;">Offline</span>
+            </div>
+          `;
+          container.appendChild(row);
+
+          // Realtime Online/Offline listener for each room member
+          db.ref(`/status/${uname}`).on("value", (statusSnap) => {
+            const data = statusSnap.val();
+            const dot = document.getElementById(`dot-${uname}`);
+            const txt = document.getElementById(`txt-${uname}`);
+            if (dot && txt) {
+              if (data && data.state === "online") {
+                dot.className = "status-dot status-online";
+                txt.textContent = "Active";
+                txt.style.color = "#2ea043";
+              } else {
+                dot.className = "status-dot";
+                txt.textContent = "Offline";
+                txt.style.color = "#8b949e";
+              }
+            }
+          });
+        });
+      });
+
+      // Synchronize Messages
+      if (messagesListener) messagesListener.off();
       const messagesRef = roomRef.child("messages");
       messagesListener = messagesRef;
 
-      // Load all previous messages & listen for new ones
       messagesRef.on("child_added", (snap) => {
         const msg = snap.val();
         appendMessage(msg.sender, msg.text);
