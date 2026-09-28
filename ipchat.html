@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>P2P Direct Cloud Chat</title>
+  <title>Persistent Cloud Chat</title>
   <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
@@ -11,7 +11,7 @@
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body { background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; }
     
-    /* Auth Modal */
+    /* Login Overlay */
     #auth-screen { position: fixed; inset: 0; background: #0d1117; display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
     .auth-card { background: #161b22; border: 1px solid #30363d; padding: 24px; border-radius: 8px; width: 100%; max-width: 340px; text-align: center; }
     .auth-card input { width: 100%; padding: 10px; margin: 10px 0; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 4px; outline: none; }
@@ -36,16 +36,17 @@
     .msg { max-width: 75%; padding: 8px 12px; border-radius: 8px; font-size: 14px; line-height: 1.4; word-break: break-word; }
     .local { background: #1f6feb; color: white; align-self: flex-end; }
     .remote { background: #21262d; color: #c9d1d9; align-self: flex-start; border: 1px solid #30363d; }
+    .sender-name { font-size: 11px; color: #8b949e; margin-bottom: 2px; }
     .system { align-self: center; font-size: 11px; color: #8b949e; background: none; }
 
-    /* Input Footer */
+    /* Footer */
     form { display: flex; padding: 12px; background: #161b22; border-top: 1px solid #30363d; gap: 8px; }
     form input { flex: 1; padding: 10px 14px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 4px; outline: none; }
   </style>
 </head>
 <body>
 
-  <!-- Login/Register Screen -->
+  <!-- Login Modal -->
   <div id="auth-screen">
     <div class="auth-card">
       <h3 style="margin-bottom: 12px; color: #58a6ff;">Enter Account</h3>
@@ -80,7 +81,6 @@
   </form>
 
   <script>
-    // Aapki exact Firebase config auto-configured[span_3](start_span)[span_3](end_span)
     const firebaseConfig = {
       apiKey: "AIzaSyBLYPolpV9Z6SadBusB5COPict reed6L%g",
       authDomain: "ipchat-b11e4.firebaseapp.com",
@@ -96,37 +96,35 @@
 
     let currentUser = localStorage.getItem("chat_username") || "";
     let activeRoom = localStorage.getItem("chat_room") || "";
-    let peerConn = null;
-    let dataChannel = null;
+    let messagesListener = null;
 
     const chatBox = document.getElementById("chat-box");
     const msgInput = document.getElementById("msg-input");
 
-    function loadHistory() {
-      const saved = JSON.parse(localStorage.getItem(`history_${activeRoom}`) || "[]");
-      chatBox.innerHTML = "";
-      saved.forEach(m => appendMessage(m.type, m.text, false));
-    }
-
-    function saveHistory(type, text) {
-      if (!activeRoom) return;
-      const saved = JSON.parse(localStorage.getItem(`history_${activeRoom}`) || "[]");
-      saved.push({ type, text, time: Date.now() });
-      localStorage.setItem(`history_${activeRoom}`, JSON.stringify(saved));
-    }
-
-    function appendMessage(type, text, save = true) {
+    function appendMessage(sender, text) {
+      const isMe = sender === currentUser;
       const div = document.createElement("div");
-      div.className = `msg ${type}`;
+      div.className = `msg ${isMe ? 'local' : 'remote'}`;
+      if (!isMe) {
+        div.innerHTML = `<div class="sender-name">${sender}</div>${text}`;
+      } else {
+        div.textContent = text;
+      }
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function appendSystem(text) {
+      const div = document.createElement("div");
+      div.className = "msg system";
       div.textContent = text;
       chatBox.appendChild(div);
       chatBox.scrollTop = chatBox.scrollHeight;
-      if (save) saveHistory(type, text);
     }
 
     function handleLogin() {
       const val = document.getElementById("username-input").value.trim();
-      if (!val) return alert("Username zaroori hai!");
+      if (!val) return alert("Username required!");
       currentUser = val;
       localStorage.setItem("chat_username", currentUser);
       initUserPresence();
@@ -135,7 +133,6 @@
 
       if (activeRoom) {
         document.getElementById("room-code-input").value = activeRoom;
-        loadHistory();
         joinRoom();
       }
     }
@@ -145,6 +142,7 @@
       handleLogin();
     }
 
+    // Tab close / background hone par automatic Offline presence set karega
     function initUserPresence() {
       const userStatusRef = db.ref(`/status/${currentUser}`);
       const connectedRef = db.ref(".info/connected");
@@ -162,21 +160,18 @@
       document.getElementById("room-code-input").value = code;
     }
 
-    async function joinRoom() {
+    function joinRoom() {
       const room = document.getElementById("room-code-input").value.trim();
       if (!room) return alert("Pehle 4-Digit Room Code daalein!");
 
       activeRoom = room;
       localStorage.setItem("chat_room", room);
-      loadHistory();
-      appendMessage("system", `Connecting to room: ${room}...`, false);
+      chatBox.innerHTML = "";
+      appendSystem(`Connected to Room: ${room}`);
 
       const roomRef = db.ref(`/rooms/${room}`);
 
-      peerConn = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-      });
-
+      // Peer Online / Offline Tracking
       roomRef.child("users").on("value", (snap) => {
         const users = snap.val() || {};
         const peers = Object.keys(users).filter(u => u !== currentUser);
@@ -197,69 +192,44 @@
         }
       });
 
+      // Join room presence
       roomRef.child(`users/${currentUser}`).set(true);
       roomRef.child(`users/${currentUser}`).onDisconnect().remove();
 
-      peerConn.onicecandidate = (e) => {
-        if (e.candidate) {
-          roomRef.child(`candidates/${currentUser}`).push(e.candidate.toJSON());
-        }
-      };
-
-      const roomSnap = await roomRef.once("value");
-      const roomData = roomSnap.val() || {};
-
-      if (!roomData.offer) {
-        dataChannel = peerConn.createDataChannel("chat");
-        setupChannel(dataChannel);
-
-        const offer = await peerConn.createOffer();
-        await peerConn.setLocalDescription(offer);
-        await roomRef.child("offer").set({ sdp: offer.sdp, type: offer.type });
-
-        roomRef.child("answer").on("value", async (snap) => {
-          const answer = snap.val();
-          if (answer && !peerConn.currentRemoteDescription) {
-            await peerConn.setRemoteDescription(new RTCSessionDescription(answer));
-          }
-        });
-      } else {
-        peerConn.ondatachannel = (e) => setupChannel(e.channel);
-        await peerConn.setRemoteDescription(new RTCSessionDescription(roomData.offer));
-
-        const answer = await peerConn.createAnswer();
-        await peerConn.setLocalDescription(answer);
-        await roomRef.child("answer").set({ sdp: answer.sdp, type: answer.type });
+      // Realtime Database Message Synchronization
+      if (messagesListener) {
+        messagesListener.off();
       }
+      
+      const messagesRef = roomRef.child("messages");
+      messagesListener = messagesRef;
 
-      roomRef.child("candidates").on("child_added", (snap) => {
-        if (snap.key !== currentUser) {
-          snap.ref.on("child_added", (candSnap) => {
-            peerConn.addIceCandidate(new RTCIceCandidate(candSnap.val()));
-          });
-        }
+      // Load all previous messages & listen for new ones instantly
+      messagesRef.on("child_added", (snap) => {
+        const msg = snap.val();
+        appendMessage(msg.sender, msg.text);
       });
     }
 
-    function setupChannel(channel) {
-      dataChannel = channel;
-      dataChannel.onopen = () => appendMessage("system", "Direct P2P Link Connected!", false);
-      dataChannel.onclose = () => appendMessage("system", "Peer disconnected.", false);
-      dataChannel.onmessage = (e) => appendMessage("remote", e.data);
-    }
-
+    // Message Send Handler
     document.getElementById("chat-form").onsubmit = (e) => {
       e.preventDefault();
       const val = msgInput.value.trim();
       if (!val) return;
 
-      if (dataChannel && dataChannel.readyState === "open") {
-        dataChannel.send(val);
-        appendMessage("local", val);
-        msgInput.value = "";
-      } else {
-        alert("P2P tunnel connect ho raha hai, thoda intezar karein ya Room Code match karein.");
+      if (!activeRoom) {
+        alert("Pehle Room Code daal kar Connect karein!");
+        return;
       }
+
+      // Save directly to Firebase Room Messages (Guaranteed delivery)
+      db.ref(`/rooms/${activeRoom}/messages`).push({
+        sender: currentUser,
+        text: val,
+        timestamp: firebase.database.ServerValue.TIMESTAMP
+      });
+
+      msgInput.value = "";
     };
   </script>
 </body>
