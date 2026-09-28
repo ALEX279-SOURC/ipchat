@@ -7,16 +7,20 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Courier New', Courier, monospace; }
     body { background: #0d1117; color: #58a6ff; padding: 15px; display: flex; flex-direction: column; height: 100vh; }
-    h3 { margin-bottom: 10px; color: #39d353; }
-    .config-panel { display: flex; gap: 10px; margin-bottom: 12px; }
-    .config-panel input { flex: 1; padding: 8px; background: #161b22; border: 1px solid #30363d; color: #58a6ff; outline: none; border-radius: 4px; }
+    h3 { margin-bottom: 8px; color: #39d353; }
+    #status-bar { padding: 6px 10px; margin-bottom: 10px; background: #21262d; border-radius: 4px; font-size: 12px; color: #f0883e; font-weight: bold; }
+    .config-panel { margin-bottom: 12px; }
+    .config-panel input { width: 100%; padding: 8px; background: #161b22; border: 1px solid #30363d; color: #58a6ff; outline: none; border-radius: 4px; }
     .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
-    textarea { width: 100%; height: 80px; background: #161b22; color: #8b949e; border: 1px solid #30363d; padding: 8px; resize: none; font-size: 11px; border-radius: 4px; }
-    button { background: #238636; color: white; font-weight: bold; border: none; padding: 8px 12px; cursor: pointer; border-radius: 4px; margin-bottom: 5px; }
+    .panel-box { display: flex; flex-direction: column; gap: 6px; }
+    textarea { width: 100%; height: 75px; background: #161b22; color: #8b949e; border: 1px solid #30363d; padding: 8px; resize: none; font-size: 11px; border-radius: 4px; }
+    .btn-row { display: flex; gap: 6px; }
+    button { background: #238636; color: white; font-weight: bold; border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-size: 12px; }
     button:hover { background: #2ea043; }
-    button:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+    .btn-sec { background: #30363d; }
+    .btn-sec:hover { background: #484f58; }
     #chat-box { flex: 1; background: #010409; border: 1px solid #30363d; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; border-radius: 4px; }
-    .msg { padding: 6px 10px; border-radius: 4px; max-width: 80%; font-size: 13px; line-height: 1.4; }
+    .msg { padding: 6px 10px; border-radius: 4px; max-width: 80%; font-size: 13px; line-height: 1.4; word-break: break-all; }
     .remote { background: #161b22; border: 1px solid #30363d; align-self: flex-start; color: #c9d1d9; }
     .local { background: #1f6feb; color: #ffffff; align-self: flex-end; }
     .system { color: #8b949e; align-self: center; font-size: 11px; }
@@ -27,43 +31,55 @@
 <body>
 
   <h3>[P2P Encrypted IP Chat]</h3>
+  <div id="status-bar">Status: Disconnected (Step 1 generate karein)</div>
 
   <div class="config-panel">
-    <input type="password" id="secret-key" placeholder="Enter Shared Secret Passphrase (Must match on both devices)" />
+    <input type="password" id="secret-key" placeholder="Enter Shared Secret Passphrase (Dono devices par SAME hona chahiye)" />
   </div>
 
   <div class="panels">
-    <div>
-      <strong>1. Host / Answer Payload:</strong>
-      <button id="btn-create-offer">Generate Payload</button>
-      <textarea id="local-sdp" placeholder="Your connection payload will appear here..." readonly></textarea>
+    <div class="panel-box">
+      <strong>Step 1: Mera Code (Local)</strong>
+      <div class="btn-row">
+        <button id="btn-create-offer">1. Code Generate Karein</button>
+        <button class="btn-sec" id="btn-copy">Copy</button>
+      </div>
+      <textarea id="local-sdp" placeholder="Generate dabane par yahan code aayega..." readonly></textarea>
     </div>
-    <div>
-      <strong>2. Peer Payload:</strong>
-      <button id="btn-connect">Connect / Accept</button>
-      <textarea id="remote-sdp" placeholder="Paste peer payload here..."></textarea>
+
+    <div class="panel-box">
+      <strong>Step 2: Samne Wale Ka Code</strong>
+      <div class="btn-row">
+        <button id="btn-connect">2. Connect / Pair</button>
+      </div>
+      <textarea id="remote-sdp" placeholder="Samne wale ka code yahan paste karke 'Connect / Pair' dabayein..."></textarea>
     </div>
   </div>
 
   <div id="chat-box"></div>
 
   <form id="chat-form" class="input-row">
-    <input type="text" id="msg-input" placeholder="Type message..." disabled autocomplete="off" />
-    <button type="submit" id="btn-send" disabled>Send</button>
+    <input type="text" id="msg-input" placeholder="Type message..." autocomplete="off" />
+    <button type="submit" id="btn-send">Send</button>
   </form>
 
   <script>
     const peerConn = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
     let dataChannel = null;
 
+    const statusBar = document.getElementById('status-bar');
     const secretInput = document.getElementById('secret-key');
     const localSdp = document.getElementById('local-sdp');
     const remoteSdp = document.getElementById('remote-sdp');
     const chatBox = document.getElementById('chat-box');
     const msgInput = document.getElementById('msg-input');
-    const btnSend = document.getElementById('btn-send');
 
-    // Web Crypto API: Passphrase se AES-GCM Key derive karna
+    function updateStatus(text, color) {
+      statusBar.textContent = `Status: ${text}`;
+      statusBar.style.color = color;
+    }
+
+    // Cryptographic Key Derivation (AES-GCM 256-bit)
     async function deriveKey(passphrase) {
       const enc = new TextEncoder();
       const baseKey = await crypto.subtle.importKey(
@@ -87,7 +103,6 @@
       );
     }
 
-    // Encrypt Text Message
     async function encryptText(plainText, key) {
       const enc = new TextEncoder();
       const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -102,7 +117,6 @@
       });
     }
 
-    // Decrypt Received Message
     async function decryptText(payload, key) {
       try {
         const parsed = JSON.parse(payload);
@@ -115,22 +129,24 @@
         );
         return new TextDecoder().decode(decrypted);
       } catch (err) {
-        return "[Error: Decryption Failed. Secret Passphrase Mismatch]";
+        return "[Error: Decryption Failed. Check Secret Passphrase]";
       }
     }
 
     function setupDataChannel(channel) {
       dataChannel = channel;
       dataChannel.onopen = () => {
-        appendMessage('system', 'Direct P2P Link Established. Traffic is AES-256-GCM encrypted.');
-        msgInput.disabled = false;
-        btnSend.disabled = false;
+        updateStatus("Connected! Direct P2P Tunnel Active (Encrypted)", "#39d353");
+        appendMessage('system', 'Direct P2P Link Established. Ab aap messages bhej sakte hain.');
       };
-      dataChannel.onclose = () => appendMessage('system', 'Connection closed.');
+      dataChannel.onclose = () => {
+        updateStatus("Disconnected", "#f85149");
+        appendMessage('system', 'Connection closed.');
+      };
       dataChannel.onmessage = async (e) => {
         const passphrase = secretInput.value.trim();
         if (!passphrase) {
-          appendMessage('system', 'Enter passphrase to decrypt incoming messages.');
+          appendMessage('system', 'Passphrase enter karein message decrypt karne ke liye.');
           return;
         }
         const key = await deriveKey(passphrase);
@@ -139,7 +155,7 @@
       };
     }
 
-    // Host: Create Offer
+    // Step 1: Offer Banayein
     document.getElementById('btn-create-offer').onclick = async () => {
       dataChannel = peerConn.createDataChannel('chat');
       setupDataChannel(dataChannel);
@@ -147,6 +163,7 @@
       peerConn.onicecandidate = (e) => {
         if (!e.candidate) {
           localSdp.value = btoa(JSON.stringify(peerConn.localDescription));
+          updateStatus("Payload ready! Step 1 copy karke dost ko bhejein.", "#e3b341");
         }
       };
 
@@ -154,26 +171,45 @@
       await peerConn.setLocalDescription(offer);
     };
 
-    // Connect: Accept Offer / Set Remote Description
+    // Step 2: Connect / Answer Handle Karein
     document.getElementById('btn-connect').onclick = async () => {
       const raw = remoteSdp.value.trim();
-      if (!raw) return;
-
-      const desc = JSON.parse(atob(raw));
-
-      if (desc.type === 'offer') {
-        peerConn.ondatachannel = (e) => setupDataChannel(e.channel);
-        peerConn.onicecandidate = (e) => {
-          if (!e.candidate) {
-            localSdp.value = btoa(JSON.stringify(peerConn.localDescription));
-          }
-        };
-        await peerConn.setRemoteDescription(desc);
-        const answer = await peerConn.createAnswer();
-        await peerConn.setLocalDescription(answer);
-      } else if (desc.type === 'answer') {
-        await peerConn.setRemoteDescription(desc);
+      if (!raw) {
+        alert("Pehle box mein code paste karein!");
+        return;
       }
+
+      try {
+        const desc = JSON.parse(atob(raw));
+
+        if (desc.type === 'offer') {
+          peerConn.ondatachannel = (e) => setupDataChannel(e.channel);
+          peerConn.onicecandidate = (e) => {
+            if (!e.candidate) {
+              localSdp.value = btoa(JSON.stringify(peerConn.localDescription));
+              updateStatus("Answer code ban gaya! Apna Step 1 code wapas Device 1 ko bhejein.", "#e3b341");
+            }
+          };
+          await peerConn.setRemoteDescription(desc);
+          const answer = await peerConn.createAnswer();
+          await peerConn.setLocalDescription(answer);
+        } else if (desc.type === 'answer') {
+          await peerConn.setRemoteDescription(desc);
+          updateStatus("Handshake process ho raha hai...", "#58a6ff");
+        }
+      } catch (err) {
+        alert("Invalid code format! Poora code theek se copy-paste karein.");
+      }
+    };
+
+    // Copy Button helper
+    document.getElementById('btn-copy').onclick = () => {
+      if (!localSdp.value) {
+        alert("Pehle 'Code Generate Karein' button dabayein!");
+        return;
+      }
+      navigator.clipboard.writeText(localSdp.value);
+      alert("Code clipboard par copy ho gaya!");
     };
 
     function appendMessage(type, text) {
@@ -184,17 +220,23 @@
       chatBox.scrollTop = chatBox.scrollHeight;
     }
 
+    // Message Send Handler
     document.getElementById('chat-form').onsubmit = async (e) => {
       e.preventDefault();
       const val = msgInput.value.trim();
       const passphrase = secretInput.value.trim();
 
       if (!passphrase) {
-        alert("Please set a Shared Secret Passphrase first!");
+        alert("Pehle dono devices par same 'Shared Secret Passphrase' daalein!");
         return;
       }
 
-      if (val && dataChannel && dataChannel.readyState === 'open') {
+      if (!dataChannel || dataChannel.readyState !== 'open') {
+        alert("Dono devices connect nahi hain! Pehle dono taraf Step 1 & Step 2 ka code swap karein.");
+        return;
+      }
+
+      if (val) {
         const key = await deriveKey(passphrase);
         const cipherPayload = await encryptText(val, key);
         dataChannel.send(cipherPayload);
@@ -204,5 +246,4 @@
     };
   </script>
 </body>
-  </html>
-  
+</html>
