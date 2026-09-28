@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>P2P Encrypted IP Chat</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Courier New', Courier, monospace; }
+    body { background: #0d1117; color: #58a6ff; padding: 15px; display: flex; flex-direction: column; height: 100vh; }
+    h3 { margin-bottom: 10px; color: #39d353; }
+    .config-panel { display: flex; gap: 10px; margin-bottom: 12px; }
+    .config-panel input { flex: 1; padding: 8px; background: #161b22; border: 1px solid #30363d; color: #58a6ff; outline: none; border-radius: 4px; }
+    .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    textarea { width: 100%; height: 80px; background: #161b22; color: #8b949e; border: 1px solid #30363d; padding: 8px; resize: none; font-size: 11px; border-radius: 4px; }
+    button { background: #238636; color: white; font-weight: bold; border: none; padding: 8px 12px; cursor: pointer; border-radius: 4px; margin-bottom: 5px; }
+    button:hover { background: #2ea043; }
+    button:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+    #chat-box { flex: 1; background: #010409; border: 1px solid #30363d; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; border-radius: 4px; }
+    .msg { padding: 6px 10px; border-radius: 4px; max-width: 80%; font-size: 13px; line-height: 1.4; }
+    .remote { background: #161b22; border: 1px solid #30363d; align-self: flex-start; color: #c9d1d9; }
+    .local { background: #1f6feb; color: #ffffff; align-self: flex-end; }
+    .system { color: #8b949e; align-self: center; font-size: 11px; }
+    .input-row { display: flex; gap: 8px; margin-top: 10px; }
+    #msg-input { flex: 1; padding: 10px; background: #161b22; border: 1px solid #30363d; color: #c9d1d9; outline: none; border-radius: 4px; }
+  </style>
+</head>
+<body>
+
+  <h3>[P2P Encrypted IP Chat]</h3>
+
+  <div class="config-panel">
+    <input type="password" id="secret-key" placeholder="Enter Shared Secret Passphrase (Must match on both devices)" />
+  </div>
+
+  <div class="panels">
+    <div>
+      <strong>1. Host / Answer Payload:</strong>
+      <button id="btn-create-offer">Generate Payload</button>
+      <textarea id="local-sdp" placeholder="Your connection payload will appear here..." readonly></textarea>
+    </div>
+    <div>
+      <strong>2. Peer Payload:</strong>
+      <button id="btn-connect">Connect / Accept</button>
+      <textarea id="remote-sdp" placeholder="Paste peer payload here..."></textarea>
+    </div>
+  </div>
+
+  <div id="chat-box"></div>
+
+  <form id="chat-form" class="input-row">
+    <input type="text" id="msg-input" placeholder="Type message..." disabled autocomplete="off" />
+    <button type="submit" id="btn-send" disabled>Send</button>
+  </form>
+
+  <script>
+    const peerConn = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+    let dataChannel = null;
+
+    const secretInput = document.getElementById('secret-key');
+    const localSdp = document.getElementById('local-sdp');
+    const remoteSdp = document.getElementById('remote-sdp');
+    const chatBox = document.getElementById('chat-box');
+    const msgInput = document.getElementById('msg-input');
+    const btnSend = document.getElementById('btn-send');
+
+    // Web Crypto API: Passphrase se AES-GCM Key derive karna
+    async function deriveKey(passphrase) {
+      const enc = new TextEncoder();
+      const baseKey = await crypto.subtle.importKey(
+        "raw",
+        enc.encode(passphrase),
+        "PBKDF2",
+        false,
+        ["deriveKey"]
+      );
+      return crypto.subtle.deriveKey(
+        {
+          name: "PBKDF2",
+          salt: enc.encode("p2p-fixed-salt"),
+          iterations: 100000,
+          hash: "SHA-256"
+        },
+        baseKey,
+        { name: "AES-GCM", length: 256 },
+        false,
+        ["encrypt", "decrypt"]
+      );
+    }
+
+    // Encrypt Text Message
+    async function encryptText(plainText, key) {
+      const enc = new TextEncoder();
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const cipherBuffer = await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv: iv },
+        key,
+        enc.encode(plainText)
+      );
+      return JSON.stringify({
+        iv: Array.from(iv),
+        data: Array.from(new Uint8Array(cipherBuffer))
+      });
+    }
+
+    // Decrypt Received Message
+    async function decryptText(payload, key) {
+      try {
+        const parsed = JSON.parse(payload);
+        const iv = new Uint8Array(parsed.iv);
+        const data = new Uint8Array(parsed.data);
+        const decrypted = await crypto.subtle.decrypt(
+          { name: "AES-GCM", iv: iv },
+          key,
+          data
+        );
+        return new TextDecoder().decode(decrypted);
+      } catch (err) {
+        return "[Error: Decryption Failed. Secret Passphrase Mismatch]";
+      }
+    }
+
+    function setupDataChannel(channel) {
+      dataChannel = channel;
+      dataChannel.onopen = () => {
+        appendMessage('system', 'Direct P2P Link Established. Traffic is AES-256-GCM encrypted.');
+        msgInput.disabled = false;
+        btnSend.disabled = false;
+      };
+      dataChannel.onclose = () => appendMessage('system', 'Connection closed.');
+      dataChannel.onmessage = async (e) => {
+        const passphrase = secretInput.value.trim();
+        if (!passphrase) {
+          appendMessage('system', 'Enter passphrase to decrypt incoming messages.');
+          return;
+        }
+        const key = await deriveKey(passphrase);
+        const decrypted = await decryptText(e.data, key);
+        appendMessage('remote', decrypted);
+      };
+    }
+
+    // Host: Create Offer
+    document.getElementById('btn-create-offer').onclick = async () => {
+      dataChannel = peerConn.createDataChannel('chat');
+      setupDataChannel(dataChannel);
+
+      peerConn.onicecandidate = (e) => {
+        if (!e.candidate) {
+          localSdp.value = btoa(JSON.stringify(peerConn.localDescription));
+        }
+      };
+
+      const offer = await peerConn.createOffer();
+      await peerConn.setLocalDescription(offer);
+    };
+
+    // Connect: Accept Offer / Set Remote Description
+    document.getElementById('btn-connect').onclick = async () => {
+      const raw = remoteSdp.value.trim();
+      if (!raw) return;
+
+      const desc = JSON.parse(atob(raw));
+
+      if (desc.type === 'offer') {
+        peerConn.ondatachannel = (e) => setupDataChannel(e.channel);
+        peerConn.onicecandidate = (e) => {
+          if (!e.candidate) {
+            localSdp.value = btoa(JSON.stringify(peerConn.localDescription));
+          }
+        };
+        await peerConn.setRemoteDescription(desc);
+        const answer = await peerConn.createAnswer();
+        await peerConn.setLocalDescription(answer);
+      } else if (desc.type === 'answer') {
+        await peerConn.setRemoteDescription(desc);
+      }
+    };
+
+    function appendMessage(type, text) {
+      const el = document.createElement('div');
+      el.className = `msg ${type}`;
+      el.textContent = type === 'system' ? text : `${type.toUpperCase()}: ${text}`;
+      chatBox.appendChild(el);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    document.getElementById('chat-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const val = msgInput.value.trim();
+      const passphrase = secretInput.value.trim();
+
+      if (!passphrase) {
+        alert("Please set a Shared Secret Passphrase first!");
+        return;
+      }
+
+      if (val && dataChannel && dataChannel.readyState === 'open') {
+        const key = await deriveKey(passphrase);
+        const cipherPayload = await encryptText(val, key);
+        dataChannel.send(cipherPayload);
+        appendMessage('local', val);
+        msgInput.value = '';
+      }
+    };
+  </script>
+</body>
+  </html>
+  
