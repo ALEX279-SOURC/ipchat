@@ -3,245 +3,262 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>P2P Encrypted IP Chat</title>
+  <title>P2P Direct Cloud Chat</title>
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Courier New', Courier, monospace; }
-    body { background: #0d1117; color: #58a6ff; padding: 15px; display: flex; flex-direction: column; height: 100vh; }
-    h3 { margin-bottom: 8px; color: #39d353; }
-    #status-bar { padding: 6px 10px; margin-bottom: 10px; background: #21262d; border-radius: 4px; font-size: 12px; color: #f0883e; font-weight: bold; }
-    .config-panel { margin-bottom: 12px; }
-    .config-panel input { width: 100%; padding: 8px; background: #161b22; border: 1px solid #30363d; color: #58a6ff; outline: none; border-radius: 4px; }
-    .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
-    .panel-box { display: flex; flex-direction: column; gap: 6px; }
-    textarea { width: 100%; height: 75px; background: #161b22; color: #8b949e; border: 1px solid #30363d; padding: 8px; resize: none; font-size: 11px; border-radius: 4px; }
-    .btn-row { display: flex; gap: 6px; }
-    button { background: #238636; color: white; font-weight: bold; border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-size: 12px; }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; }
+    
+    /* Auth Modal */
+    #auth-screen { position: fixed; inset: 0; background: #0d1117; display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
+    .auth-card { background: #161b22; border: 1px solid #30363d; padding: 24px; border-radius: 8px; width: 100%; max-width: 340px; text-align: center; }
+    .auth-card input { width: 100%; padding: 10px; margin: 10px 0; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 4px; outline: none; }
+    
+    /* Header */
+    header { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; }
+    .user-info { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #8b949e; }
+    .status-online { background: #2ea043; }
+    
+    /* Room Controls */
+    .controls { background: #161b22; padding: 10px 16px; display: flex; gap: 10px; border-bottom: 1px solid #30363d; font-size: 13px; }
+    .controls input { padding: 6px 10px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 4px; width: 140px; outline: none; }
+    
+    button { background: #238636; color: white; border: none; padding: 8px 14px; border-radius: 4px; font-weight: bold; cursor: pointer; }
     button:hover { background: #2ea043; }
-    .btn-sec { background: #30363d; }
-    .btn-sec:hover { background: #484f58; }
-    #chat-box { flex: 1; background: #010409; border: 1px solid #30363d; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; border-radius: 4px; }
-    .msg { padding: 6px 10px; border-radius: 4px; max-width: 80%; font-size: 13px; line-height: 1.4; word-break: break-all; }
-    .remote { background: #161b22; border: 1px solid #30363d; align-self: flex-start; color: #c9d1d9; }
-    .local { background: #1f6feb; color: #ffffff; align-self: flex-end; }
-    .system { color: #8b949e; align-self: center; font-size: 11px; }
-    .input-row { display: flex; gap: 8px; margin-top: 10px; }
-    #msg-input { flex: 1; padding: 10px; background: #161b22; border: 1px solid #30363d; color: #c9d1d9; outline: none; border-radius: 4px; }
+    .btn-secondary { background: #21262d; border: 1px solid #30363d; }
+    .btn-secondary:hover { background: #30363d; }
+
+    /* Chat Area */
+    #chat-box { flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; background: #010409; }
+    .msg { max-width: 75%; padding: 8px 12px; border-radius: 8px; font-size: 14px; line-height: 1.4; word-break: break-word; }
+    .local { background: #1f6feb; color: white; align-self: flex-end; }
+    .remote { background: #21262d; color: #c9d1d9; align-self: flex-start; border: 1px solid #30363d; }
+    .system { align-self: center; font-size: 11px; color: #8b949e; background: none; }
+
+    /* Input Footer */
+    form { display: flex; padding: 12px; background: #161b22; border-top: 1px solid #30363d; gap: 8px; }
+    form input { flex: 1; padding: 10px 14px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 4px; outline: none; }
   </style>
 </head>
 <body>
 
-  <h3>[P2P Encrypted IP Chat]</h3>
-  <div id="status-bar">Status: Disconnected (Step 1 generate karein)</div>
-
-  <div class="config-panel">
-    <input type="password" id="secret-key" placeholder="Enter Shared Secret Passphrase (Dono devices par SAME hona chahiye)" />
+  <!-- Login/Register Screen -->
+  <div id="auth-screen">
+    <div class="auth-card">
+      <h3 style="margin-bottom: 12px; color: #58a6ff;">Enter Account</h3>
+      <input type="text" id="username-input" placeholder="Choose a Username..." autocomplete="off" />
+      <button style="width: 100%; margin-top: 5px;" onclick="handleLogin()">Login / Start</button>
+    </div>
   </div>
 
-  <div class="panels">
-    <div class="panel-box">
-      <strong>Step 1: Mera Code (Local)</strong>
-      <div class="btn-row">
-        <button id="btn-create-offer">1. Code Generate Karein</button>
-        <button class="btn-sec" id="btn-copy">Copy</button>
-      </div>
-      <textarea id="local-sdp" placeholder="Generate dabane par yahan code aayega..." readonly></textarea>
+  <header>
+    <div class="user-info">
+      <span class="status-dot status-online"></span>
+      <strong id="display-user">User</strong>
     </div>
+    <div class="user-info">
+      <span>Peer:</span>
+      <span id="peer-status-dot" class="status-dot"></span>
+      <span id="peer-status-text" style="font-size: 12px;">Offline</span>
+    </div>
+  </header>
 
-    <div class="panel-box">
-      <strong>Step 2: Samne Wale Ka Code</strong>
-      <div class="btn-row">
-        <button id="btn-connect">2. Connect / Pair</button>
-      </div>
-      <textarea id="remote-sdp" placeholder="Samne wale ka code yahan paste karke 'Connect / Pair' dabayein..."></textarea>
-    </div>
+  <div class="controls">
+    <input type="text" id="room-code-input" placeholder="4-Digit Room Code" />
+    <button onclick="joinRoom()">Connect</button>
+    <button class="btn-secondary" onclick="generateShortRoom()">New Code</button>
   </div>
 
   <div id="chat-box"></div>
 
-  <form id="chat-form" class="input-row">
-    <input type="text" id="msg-input" placeholder="Type message..." autocomplete="off" />
-    <button type="submit" id="btn-send">Send</button>
+  <form id="chat-form">
+    <input type="text" id="msg-input" placeholder="Type a message..." autocomplete="off" required />
+    <button type="submit">Send</button>
   </form>
 
   <script>
-    const peerConn = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+    // Aapki exact Firebase config auto-configured[span_3](start_span)[span_3](end_span)
+    const firebaseConfig = {
+      apiKey: "AIzaSyBLYPolpV9Z6SadBusB5COPict reed6L%g",
+      authDomain: "ipchat-b11e4.firebaseapp.com",
+      databaseURL: "https://ipchat-b11e4-default-rtdb.firebaseio.com",
+      projectId: "ipchat-b11e4",
+      storageBucket: "ipchat-b11e4.firebasestorage.app",
+      messagingSenderId: "971834359860",
+      appId: "1:971834359860:web:9e2b936ea768806c150339"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    let currentUser = localStorage.getItem("chat_username") || "";
+    let activeRoom = localStorage.getItem("chat_room") || "";
+    let peerConn = null;
     let dataChannel = null;
 
-    const statusBar = document.getElementById('status-bar');
-    const secretInput = document.getElementById('secret-key');
-    const localSdp = document.getElementById('local-sdp');
-    const remoteSdp = document.getElementById('remote-sdp');
-    const chatBox = document.getElementById('chat-box');
-    const msgInput = document.getElementById('msg-input');
+    const chatBox = document.getElementById("chat-box");
+    const msgInput = document.getElementById("msg-input");
 
-    function updateStatus(text, color) {
-      statusBar.textContent = `Status: ${text}`;
-      statusBar.style.color = color;
+    function loadHistory() {
+      const saved = JSON.parse(localStorage.getItem(`history_${activeRoom}`) || "[]");
+      chatBox.innerHTML = "";
+      saved.forEach(m => appendMessage(m.type, m.text, false));
     }
 
-    // Cryptographic Key Derivation (AES-GCM 256-bit)
-    async function deriveKey(passphrase) {
-      const enc = new TextEncoder();
-      const baseKey = await crypto.subtle.importKey(
-        "raw",
-        enc.encode(passphrase),
-        "PBKDF2",
-        false,
-        ["deriveKey"]
-      );
-      return crypto.subtle.deriveKey(
-        {
-          name: "PBKDF2",
-          salt: enc.encode("p2p-fixed-salt"),
-          iterations: 100000,
-          hash: "SHA-256"
-        },
-        baseKey,
-        { name: "AES-GCM", length: 256 },
-        false,
-        ["encrypt", "decrypt"]
-      );
+    function saveHistory(type, text) {
+      if (!activeRoom) return;
+      const saved = JSON.parse(localStorage.getItem(`history_${activeRoom}`) || "[]");
+      saved.push({ type, text, time: Date.now() });
+      localStorage.setItem(`history_${activeRoom}`, JSON.stringify(saved));
     }
 
-    async function encryptText(plainText, key) {
-      const enc = new TextEncoder();
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-      const cipherBuffer = await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv: iv },
-        key,
-        enc.encode(plainText)
-      );
-      return JSON.stringify({
-        iv: Array.from(iv),
-        data: Array.from(new Uint8Array(cipherBuffer))
+    function appendMessage(type, text, save = true) {
+      const div = document.createElement("div");
+      div.className = `msg ${type}`;
+      div.textContent = text;
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+      if (save) saveHistory(type, text);
+    }
+
+    function handleLogin() {
+      const val = document.getElementById("username-input").value.trim();
+      if (!val) return alert("Username zaroori hai!");
+      currentUser = val;
+      localStorage.setItem("chat_username", currentUser);
+      initUserPresence();
+      document.getElementById("auth-screen").style.display = "none";
+      document.getElementById("display-user").textContent = currentUser;
+
+      if (activeRoom) {
+        document.getElementById("room-code-input").value = activeRoom;
+        loadHistory();
+        joinRoom();
+      }
+    }
+
+    if (currentUser) {
+      document.getElementById("username-input").value = currentUser;
+      handleLogin();
+    }
+
+    function initUserPresence() {
+      const userStatusRef = db.ref(`/status/${currentUser}`);
+      const connectedRef = db.ref(".info/connected");
+
+      connectedRef.on("value", (snap) => {
+        if (snap.val() === true) {
+          userStatusRef.onDisconnect().set({ state: "offline", lastChanged: firebase.database.ServerValue.TIMESTAMP });
+          userStatusRef.set({ state: "online", lastChanged: firebase.database.ServerValue.TIMESTAMP });
+        }
       });
     }
 
-    async function decryptText(payload, key) {
-      try {
-        const parsed = JSON.parse(payload);
-        const iv = new Uint8Array(parsed.iv);
-        const data = new Uint8Array(parsed.data);
-        const decrypted = await crypto.subtle.decrypt(
-          { name: "AES-GCM", iv: iv },
-          key,
-          data
-        );
-        return new TextDecoder().decode(decrypted);
-      } catch (err) {
-        return "[Error: Decryption Failed. Check Secret Passphrase]";
-      }
+    function generateShortRoom() {
+      const code = Math.floor(1000 + Math.random() * 9000).toString();
+      document.getElementById("room-code-input").value = code;
     }
 
-    function setupDataChannel(channel) {
-      dataChannel = channel;
-      dataChannel.onopen = () => {
-        updateStatus("Connected! Direct P2P Tunnel Active (Encrypted)", "#39d353");
-        appendMessage('system', 'Direct P2P Link Established. Ab aap messages bhej sakte hain.');
-      };
-      dataChannel.onclose = () => {
-        updateStatus("Disconnected", "#f85149");
-        appendMessage('system', 'Connection closed.');
-      };
-      dataChannel.onmessage = async (e) => {
-        const passphrase = secretInput.value.trim();
-        if (!passphrase) {
-          appendMessage('system', 'Passphrase enter karein message decrypt karne ke liye.');
-          return;
+    async function joinRoom() {
+      const room = document.getElementById("room-code-input").value.trim();
+      if (!room) return alert("Pehle 4-Digit Room Code daalein!");
+
+      activeRoom = room;
+      localStorage.setItem("chat_room", room);
+      loadHistory();
+      appendMessage("system", `Connecting to room: ${room}...`, false);
+
+      const roomRef = db.ref(`/rooms/${room}`);
+
+      peerConn = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+      });
+
+      roomRef.child("users").on("value", (snap) => {
+        const users = snap.val() || {};
+        const peers = Object.keys(users).filter(u => u !== currentUser);
+        if (peers.length > 0) {
+          const peerName = peers[0];
+          db.ref(`/status/${peerName}`).on("value", (s) => {
+            const data = s.val();
+            const dot = document.getElementById("peer-status-dot");
+            const txt = document.getElementById("peer-status-text");
+            if (data && data.state === "online") {
+              dot.className = "status-dot status-online";
+              txt.textContent = `${peerName} (Online)`;
+            } else {
+              dot.className = "status-dot";
+              txt.textContent = `${peerName} (Offline)`;
+            }
+          });
         }
-        const key = await deriveKey(passphrase);
-        const decrypted = await decryptText(e.data, key);
-        appendMessage('remote', decrypted);
-      };
-    }
+      });
 
-    // Step 1: Offer Banayein
-    document.getElementById('btn-create-offer').onclick = async () => {
-      dataChannel = peerConn.createDataChannel('chat');
-      setupDataChannel(dataChannel);
+      roomRef.child(`users/${currentUser}`).set(true);
+      roomRef.child(`users/${currentUser}`).onDisconnect().remove();
 
       peerConn.onicecandidate = (e) => {
-        if (!e.candidate) {
-          localSdp.value = btoa(JSON.stringify(peerConn.localDescription));
-          updateStatus("Payload ready! Step 1 copy karke dost ko bhejein.", "#e3b341");
+        if (e.candidate) {
+          roomRef.child(`candidates/${currentUser}`).push(e.candidate.toJSON());
         }
       };
 
-      const offer = await peerConn.createOffer();
-      await peerConn.setLocalDescription(offer);
-    };
+      const roomSnap = await roomRef.once("value");
+      const roomData = roomSnap.val() || {};
 
-    // Step 2: Connect / Answer Handle Karein
-    document.getElementById('btn-connect').onclick = async () => {
-      const raw = remoteSdp.value.trim();
-      if (!raw) {
-        alert("Pehle box mein code paste karein!");
-        return;
+      if (!roomData.offer) {
+        dataChannel = peerConn.createDataChannel("chat");
+        setupChannel(dataChannel);
+
+        const offer = await peerConn.createOffer();
+        await peerConn.setLocalDescription(offer);
+        await roomRef.child("offer").set({ sdp: offer.sdp, type: offer.type });
+
+        roomRef.child("answer").on("value", async (snap) => {
+          const answer = snap.val();
+          if (answer && !peerConn.currentRemoteDescription) {
+            await peerConn.setRemoteDescription(new RTCSessionDescription(answer));
+          }
+        });
+      } else {
+        peerConn.ondatachannel = (e) => setupChannel(e.channel);
+        await peerConn.setRemoteDescription(new RTCSessionDescription(roomData.offer));
+
+        const answer = await peerConn.createAnswer();
+        await peerConn.setLocalDescription(answer);
+        await roomRef.child("answer").set({ sdp: answer.sdp, type: answer.type });
       }
 
-      try {
-        const desc = JSON.parse(atob(raw));
-
-        if (desc.type === 'offer') {
-          peerConn.ondatachannel = (e) => setupDataChannel(e.channel);
-          peerConn.onicecandidate = (e) => {
-            if (!e.candidate) {
-              localSdp.value = btoa(JSON.stringify(peerConn.localDescription));
-              updateStatus("Answer code ban gaya! Apna Step 1 code wapas Device 1 ko bhejein.", "#e3b341");
-            }
-          };
-          await peerConn.setRemoteDescription(desc);
-          const answer = await peerConn.createAnswer();
-          await peerConn.setLocalDescription(answer);
-        } else if (desc.type === 'answer') {
-          await peerConn.setRemoteDescription(desc);
-          updateStatus("Handshake process ho raha hai...", "#58a6ff");
+      roomRef.child("candidates").on("child_added", (snap) => {
+        if (snap.key !== currentUser) {
+          snap.ref.on("child_added", (candSnap) => {
+            peerConn.addIceCandidate(new RTCIceCandidate(candSnap.val()));
+          });
         }
-      } catch (err) {
-        alert("Invalid code format! Poora code theek se copy-paste karein.");
-      }
-    };
-
-    // Copy Button helper
-    document.getElementById('btn-copy').onclick = () => {
-      if (!localSdp.value) {
-        alert("Pehle 'Code Generate Karein' button dabayein!");
-        return;
-      }
-      navigator.clipboard.writeText(localSdp.value);
-      alert("Code clipboard par copy ho gaya!");
-    };
-
-    function appendMessage(type, text) {
-      const el = document.createElement('div');
-      el.className = `msg ${type}`;
-      el.textContent = type === 'system' ? text : `${type.toUpperCase()}: ${text}`;
-      chatBox.appendChild(el);
-      chatBox.scrollTop = chatBox.scrollHeight;
+      });
     }
 
-    // Message Send Handler
-    document.getElementById('chat-form').onsubmit = async (e) => {
+    function setupChannel(channel) {
+      dataChannel = channel;
+      dataChannel.onopen = () => appendMessage("system", "Direct P2P Link Connected!", false);
+      dataChannel.onclose = () => appendMessage("system", "Peer disconnected.", false);
+      dataChannel.onmessage = (e) => appendMessage("remote", e.data);
+    }
+
+    document.getElementById("chat-form").onsubmit = (e) => {
       e.preventDefault();
       const val = msgInput.value.trim();
-      const passphrase = secretInput.value.trim();
+      if (!val) return;
 
-      if (!passphrase) {
-        alert("Pehle dono devices par same 'Shared Secret Passphrase' daalein!");
-        return;
-      }
-
-      if (!dataChannel || dataChannel.readyState !== 'open') {
-        alert("Dono devices connect nahi hain! Pehle dono taraf Step 1 & Step 2 ka code swap karein.");
-        return;
-      }
-
-      if (val) {
-        const key = await deriveKey(passphrase);
-        const cipherPayload = await encryptText(val, key);
-        dataChannel.send(cipherPayload);
-        appendMessage('local', val);
-        msgInput.value = '';
+      if (dataChannel && dataChannel.readyState === "open") {
+        dataChannel.send(val);
+        appendMessage("local", val);
+        msgInput.value = "";
+      } else {
+        alert("P2P tunnel connect ho raha hai, thoda intezar karein ya Room Code match karein.");
       }
     };
   </script>
