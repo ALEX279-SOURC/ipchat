@@ -2,14 +2,23 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Persistent Cloud Chat</title>
   <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+    html, body { height: 100%; width: 100%; overflow: hidden; background: #0d1117; }
+    
+    /* Main wrapper to lock layout on mobile browsers */
+    #app-container {
+      display: flex;
+      flex-direction: column;
+      height: 100dvh; /* Dynamic viewport height fix for mobile */
+      width: 100%;
+      color: #c9d1d9;
+    }
     
     /* Login Modal */
     #auth-screen { position: fixed; inset: 0; background: #0d1117; display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
@@ -17,14 +26,14 @@
     .auth-card input { width: 100%; padding: 10px; margin: 10px 0; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 4px; outline: none; }
     
     /* Header */
-    header { background: #161b22; border-bottom: 1px solid #30363d; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; }
+    header { background: #161b22; border-bottom: 1px solid #30363d; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
     .user-info { display: flex; align-items: center; gap: 8px; font-size: 14px; }
     .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #8b949e; display: inline-block; }
     .status-online { background: #2ea043; }
     
     /* Room Controls */
-    .controls { background: #161b22; padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid #30363d; font-size: 13px; align-items: center; }
-    .controls input { padding: 6px 10px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 4px; width: 120px; outline: none; }
+    .controls { background: #161b22; padding: 8px 16px; display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid #30363d; font-size: 13px; align-items: center; flex-shrink: 0; }
+    .controls input { padding: 6px 10px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 4px; width: 110px; outline: none; }
     
     button { background: #238636; color: white; border: none; padding: 7px 12px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 13px; }
     button:hover { background: #2ea043; }
@@ -36,16 +45,16 @@
     .btn-users:hover { background: #484f58; }
 
     /* Chat Area */
-    #chat-box { flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; background: #010409; }
+    #chat-box { flex: 1; min-height: 0; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; background: #010409; }
     .msg { max-width: 75%; padding: 8px 12px; border-radius: 8px; font-size: 14px; line-height: 1.4; word-break: break-word; }
     .local { background: #1f6feb; color: white; align-self: flex-end; }
     .remote { background: #21262d; color: #c9d1d9; align-self: flex-start; border: 1px solid #30363d; }
     .sender-name { font-size: 11px; color: #8b949e; margin-bottom: 2px; }
     .system { align-self: center; font-size: 11px; color: #8b949e; background: none; }
 
-    /* Footer */
-    form { display: flex; padding: 12px; background: #161b22; border-top: 1px solid #30363d; gap: 8px; }
-    form input { flex: 1; padding: 10px 14px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 4px; outline: none; }
+    /* Bottom Fixed Footer Form */
+    #chat-form { display: flex; padding: 10px 14px; background: #161b22; border-top: 1px solid #30363d; gap: 8px; flex-shrink: 0; }
+    #msg-input { flex: 1; padding: 10px 14px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 4px; outline: none; font-size: 14px; }
 
     /* Members Modal Popup */
     #users-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 50; align-items: center; justify-content: center; padding: 15px; }
@@ -82,29 +91,31 @@
     </div>
   </div>
 
-  <header>
-    <div class="user-info">
-      <span class="status-dot status-online"></span>
-      <strong id="display-user">User</strong>
-    </div>
-    <div style="display: flex; align-items: center; gap: 8px;">
-      <button class="btn-users" onclick="toggleUsersModal()">👥 <span id="user-count-badge">0</span></button>
-    </div>
-  </header>
+  <div id="app-container">
+    <header>
+      <div class="user-info">
+        <span class="status-dot status-online"></span>
+        <strong id="display-user">User</strong>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <button class="btn-users" onclick="toggleUsersModal()">👥 <span id="user-count-badge">0</span></button>
+      </div>
+    </header>
 
-  <div class="controls">
-    <input type="text" id="room-code-input" placeholder="4-Digit Code" />
-    <button onclick="joinRoom()">Connect</button>
-    <button class="btn-secondary" onclick="generateShortRoom()">New Code</button>
-    <button class="btn-share" onclick="shareRoomLink()">🔗 Share Link</button>
+    <div class="controls">
+      <input type="text" id="room-code-input" placeholder="4-Digit Code" />
+      <button onclick="joinRoom()">Connect</button>
+      <button class="btn-secondary" onclick="generateShortRoom()">New Code</button>
+      <button class="btn-share" onclick="shareRoomLink()">🔗 Share Link</button>
+    </div>
+
+    <div id="chat-box"></div>
+
+    <form id="chat-form">
+      <input type="text" id="msg-input" placeholder="Type a message..." autocomplete="off" required />
+      <button type="submit">Send</button>
+    </form>
   </div>
-
-  <div id="chat-box"></div>
-
-  <form id="chat-form">
-    <input type="text" id="msg-input" placeholder="Type a message..." autocomplete="off" required />
-    <button type="submit">Send</button>
-  </form>
 
   <script>
     const firebaseConfig = {
@@ -232,7 +243,6 @@
 
       const roomRef = db.ref(`/rooms/${room}`);
 
-      // Check ya assign Room Admin
       const adminSnap = await roomRef.child("admin").once("value");
       if (!adminSnap.exists()) {
         await roomRef.child("admin").set(currentUser);
@@ -241,16 +251,13 @@
         roomAdmin = adminSnap.val();
       }
 
-      // Live Track Admin
       roomRef.child("admin").on("value", (s) => {
         if (s.exists()) roomAdmin = s.val();
       });
 
-      // User presence inside room
       roomRef.child(`users/${currentUser}`).set(true);
       roomRef.child(`users/${currentUser}`).onDisconnect().remove();
 
-      // Listen for Room Members and Status
       roomRef.child("users").on("value", (snap) => {
         const users = snap.val() || {};
         const userList = Object.keys(users);
@@ -279,7 +286,6 @@
           `;
           container.appendChild(row);
 
-          // Realtime Online/Offline listener for each room member
           db.ref(`/status/${uname}`).on("value", (statusSnap) => {
             const data = statusSnap.val();
             const dot = document.getElementById(`dot-${uname}`);
@@ -299,7 +305,6 @@
         });
       });
 
-      // Synchronize Messages
       if (messagesListener) messagesListener.off();
       const messagesRef = roomRef.child("messages");
       messagesListener = messagesRef;
@@ -310,7 +315,6 @@
       });
     }
 
-    // Message Send Handler
     document.getElementById("chat-form").onsubmit = (e) => {
       e.preventDefault();
       const val = msgInput.value.trim();
