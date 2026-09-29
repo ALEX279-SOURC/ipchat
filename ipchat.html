@@ -17,8 +17,31 @@
       height: 100dvh;
       width: 100%;
       color: #c9d1d9;
+      position: relative;
     }
     
+    /* In-App Floating Notification Banner */
+    #inapp-toast {
+      position: absolute;
+      top: 10px;
+      left: 12px;
+      right: 12px;
+      background: #1f6feb;
+      color: white;
+      padding: 10px 14px;
+      border-radius: 8px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 1000;
+      animation: slideDown 0.3s ease;
+    }
+    @keyframes slideDown {
+      from { transform: translateY(-30px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
     /* Login Modal */
     #auth-screen { position: fixed; inset: 0; background: #0d1117; display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
     .auth-card { background: #161b22; border: 1px solid #30363d; padding: 24px; border-radius: 8px; width: 100%; max-width: 340px; text-align: center; }
@@ -113,6 +136,12 @@
 </head>
 <body>
 
+  <!-- In-App Floating Toast Notification -->
+  <div id="inapp-toast">
+    <div style="font-size: 12px;" id="toast-text">New notification</div>
+    <span style="cursor: pointer; margin-left: 10px; font-weight: bold;" onclick="hideToast()">✕</span>
+  </div>
+
   <!-- Login Modal -->
   <div id="auth-screen">
     <div class="auth-card">
@@ -192,33 +221,92 @@
     let roomAdmin = "";
     let messagesListener = null;
     let selectedReply = null;
-    let knownUsers = new Set(); // Track existing users to identify new joins
-    let isInitialLoad = true;
+    let knownUsers = new Set();
+    let isInitialUsersLoaded = false;
+    let isInitialMessagesLoaded = false;
+    let swRegistration = null;
 
     const chatBox = document.getElementById("chat-box");
     const msgInput = document.getElementById("msg-input");
 
-    // Notification Permission Function
+    // Audio Notification Chime (Standard Pop)
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playBeep() {
+      try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.08); // A5
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.25);
+      } catch(e) {}
+    }
+
+    // Register Inline Service Worker for Android Chrome Support
+    if ('serviceWorker' in navigator) {
+      const swCode = `
+        self.addEventListener('notificationclick', function(event) {
+          event.notification.close();
+          event.waitUntil(
+            clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
+              for (var i = 0; i < clientList.length; i++) {
+                var client = clientList[i];
+                if ('focus' in client) return client.focus();
+              }
+              if (clients.openWindow) return clients.openWindow('/');
+            })
+          );
+        });
+      `;
+      const blob = new Blob([swCode], { type: 'application/javascript' });
+      navigator.serviceWorker.register(URL.createObjectURL(blob))
+        .then(reg => { swRegistration = reg; })
+        .catch(err => console.log('SW registration error', err));
+    }
+
+    // Request Notification Permission
     function requestNotificationPermission() {
       if ("Notification" in window && Notification.permission !== "granted") {
         Notification.requestPermission();
       }
     }
 
-    // Trigger System Notification
-    function showNotification(title, body) {
+    // Toast Banner Helper
+    function showToast(text) {
+      const toast = document.getElementById("inapp-toast");
+      document.getElementById("toast-text").innerHTML = text;
+      toast.style.display = "flex";
+      setTimeout(() => { toast.style.display = "none"; }, 4000);
+    }
+
+    function hideToast() {
+      document.getElementById("inapp-toast").style.display = "none";
+    }
+
+    // Dual Notification Sender (Service Worker + Fallback + Toast)
+    function notifyAlert(title, message) {
+      playBeep();
+      showToast(`<strong>${title}</strong>: ${message}`);
+
       if ("Notification" in window && Notification.permission === "granted") {
-        try {
-          const notif = new Notification(title, {
-            body: body,
-            icon: "https://cdn-icons-png.flxml.com/512/1041/1041916.png",
-            tag: "ipchat-notif"
-          });
-          notif.onclick = function() {
-            window.focus();
-            this.close();
-          };
-        } catch(e) {}
+        const options = {
+          body: message,
+          icon: "https://cdn-icons-png.flxml.com/512/1041/1041916.png",
+          vibrate: [200, 100, 200]
+        };
+
+        if (swRegistration && swRegistration.showNotification) {
+          swRegistration.showNotification(title, options);
+        } else {
+          try {
+            new Notification(title, options);
+          } catch(e) {}
+        }
       }
     }
 
@@ -324,7 +412,11 @@
       if (!val) return alert("Username required!");
       currentUser = val;
       localStorage.setItem("chat_username", currentUser);
-      requestNotificationPermission(); // Ask for notification permission on login
+      
+      // Unlock audio and ask notification permission
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      requestNotificationPermission();
+
       initUserPresence();
       document.getElementById("auth-screen").style.display = "none";
       document.getElementById("display-user").textContent = currentUser;
@@ -403,20 +495,26 @@
         if (s.exists()) roomAdmin = s.val();
       });
 
-      // User presence inside room
+      // Presence
       roomRef.child(`users/${currentUser}`).set(true);
       roomRef.child(`users/${currentUser}`).onDisconnect().remove();
 
-      // Listen for Room Members, Status & Join Notifications
+      // Listen for initial users load
+      roomRef.child("users").once("value", (snap) => {
+        const users = snap.val() || {};
+        Object.keys(users).forEach(u => knownUsers.add(u));
+        isInitialUsersLoaded = true;
+      });
+
+      // User Join Events Listener
       roomRef.child("users").on("value", (snap) => {
         const users = snap.val() || {};
         const userList = Object.keys(users);
         document.getElementById("user-count-badge").textContent = userList.length;
 
-        // Detect newly joined members
         userList.forEach(uname => {
-          if (!knownUsers.has(uname) && uname !== currentUser && !isInitialLoad) {
-            showNotification("IPChat", `🎉 ${uname} room mein connect ho gaya!`);
+          if (isInitialUsersLoaded && !knownUsers.has(uname) && uname !== currentUser) {
+            notifyAlert("IPChat", `🎉 ${uname} room mein connect ho gaya!`);
             appendSystem(`${uname} joined the chat`);
           }
           knownUsers.add(uname);
@@ -462,27 +560,24 @@
             }
           });
         });
-
-        isInitialLoad = false;
       });
 
-      // Synchronize Messages & New Message Notification
+      // Synchronize Messages & Live Notifications
       if (messagesListener) messagesListener.off();
       const messagesRef = roomRef.child("messages");
       messagesListener = messagesRef;
 
-      let initialMessagesLoaded = false;
       messagesRef.once("value", () => {
-        initialMessagesLoaded = true;
+        isInitialMessagesLoaded = true;
       });
 
       messagesRef.on("child_added", (snap) => {
         const msg = snap.val();
         appendMessage(msg);
 
-        // Notify if message is from another user and received live
-        if (initialMessagesLoaded && msg.sender !== currentUser) {
-          showNotification(`IPChat - ${msg.sender}`, msg.text);
+        // Sirf naye aaye hue messages par alert trigger karein
+        if (isInitialMessagesLoaded && msg.sender !== currentUser) {
+          notifyAlert(`IPChat - ${msg.sender}`, msg.text);
         }
       });
     }
