@@ -46,7 +46,6 @@
     /* Chat Area */
     #chat-box { flex: 1; min-height: 0; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; background: #010409; }
     
-    /* Message Bubble & Swipe Styles */
     .msg-wrapper { display: flex; flex-direction: column; position: relative; width: 100%; }
     .msg { 
       max-width: 75%; 
@@ -63,7 +62,6 @@
     .remote { background: #21262d; color: #c9d1d9; align-self: flex-start; border: 1px solid #30363d; }
     .sender-name { font-size: 11px; color: #58a6ff; font-weight: bold; margin-bottom: 2px; }
     
-    /* WhatsApp Quoted Reply inside Bubble */
     .reply-quote {
       background: rgba(0, 0, 0, 0.25);
       border-left: 3px solid #58a6ff;
@@ -75,7 +73,6 @@
     .reply-quote-sender { font-weight: bold; color: #58a6ff; margin-bottom: 1px; }
     .reply-quote-text { color: #8b949e; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 200px; }
 
-    /* Bottom Timestamp */
     .msg-content { display: inline-block; padding-right: 48px; }
     .msg-time { 
       font-size: 10px; 
@@ -87,7 +84,6 @@
     }
     .system { align-self: center; font-size: 11px; color: #8b949e; background: none; }
 
-    /* Reply Action Bar (Shows when swiped) */
     #reply-preview-bar {
       display: none;
       background: #161b22;
@@ -103,11 +99,9 @@
     .reply-preview-info span { color: #8b949e; display: block; max-width: 250px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
     .reply-close-btn { cursor: pointer; color: #8b949e; font-size: 16px; padding: 2px 6px; }
 
-    /* Footer Form */
     #chat-form { display: flex; padding: 10px 14px; background: #161b22; border-top: 1px solid #30363d; gap: 8px; flex-shrink: 0; }
     #msg-input { flex: 1; padding: 10px 14px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 4px; outline: none; font-size: 14px; }
 
-    /* Members Modal Popup */
     #users-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 50; align-items: center; justify-content: center; padding: 15px; }
     .users-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; width: 100%; max-width: 320px; overflow: hidden; }
     .users-card-header { padding: 12px 16px; border-bottom: 1px solid #30363d; display: flex; justify-content: space-between; align-items: center; }
@@ -162,7 +156,6 @@
 
     <div id="chat-box"></div>
 
-    <!-- Active Reply Banner Preview -->
     <div id="reply-preview-bar">
       <div class="reply-preview-info">
         <strong id="reply-user-label">Replying to User</strong>
@@ -198,10 +191,36 @@
     let activeRoom = urlRoom || localStorage.getItem("chat_room") || "";
     let roomAdmin = "";
     let messagesListener = null;
-    let selectedReply = null; // Store selected reply message object
+    let selectedReply = null;
+    let knownUsers = new Set(); // Track existing users to identify new joins
+    let isInitialLoad = true;
 
     const chatBox = document.getElementById("chat-box");
     const msgInput = document.getElementById("msg-input");
+
+    // Notification Permission Function
+    function requestNotificationPermission() {
+      if ("Notification" in window && Notification.permission !== "granted") {
+        Notification.requestPermission();
+      }
+    }
+
+    // Trigger System Notification
+    function showNotification(title, body) {
+      if ("Notification" in window && Notification.permission === "granted") {
+        try {
+          const notif = new Notification(title, {
+            body: body,
+            icon: "https://cdn-icons-png.flxml.com/512/1041/1041916.png",
+            tag: "ipchat-notif"
+          });
+          notif.onclick = function() {
+            window.focus();
+            this.close();
+          };
+        } catch(e) {}
+      }
+    }
 
     function formatTime(timestamp) {
       if (!timestamp) return "";
@@ -249,7 +268,6 @@
         <span class="msg-time">${timeStr}</span>
       `;
 
-      // Swipe-to-reply gesture handling
       let startX = 0;
       let currentX = 0;
 
@@ -275,7 +293,6 @@
         currentX = 0;
       });
 
-      // Desktop double click to reply
       div.addEventListener('dblclick', () => {
         initiateReply(msgData.sender, msgData.text);
       });
@@ -307,6 +324,7 @@
       if (!val) return alert("Username required!");
       currentUser = val;
       localStorage.setItem("chat_username", currentUser);
+      requestNotificationPermission(); // Ask for notification permission on login
       initUserPresence();
       document.getElementById("auth-screen").style.display = "none";
       document.getElementById("display-user").textContent = currentUser;
@@ -385,13 +403,24 @@
         if (s.exists()) roomAdmin = s.val();
       });
 
+      // User presence inside room
       roomRef.child(`users/${currentUser}`).set(true);
       roomRef.child(`users/${currentUser}`).onDisconnect().remove();
 
+      // Listen for Room Members, Status & Join Notifications
       roomRef.child("users").on("value", (snap) => {
         const users = snap.val() || {};
         const userList = Object.keys(users);
         document.getElementById("user-count-badge").textContent = userList.length;
+
+        // Detect newly joined members
+        userList.forEach(uname => {
+          if (!knownUsers.has(uname) && uname !== currentUser && !isInitialLoad) {
+            showNotification("IPChat", `🎉 ${uname} room mein connect ho gaya!`);
+            appendSystem(`${uname} joined the chat`);
+          }
+          knownUsers.add(uname);
+        });
 
         const container = document.getElementById("users-list-container");
         container.innerHTML = "";
@@ -433,14 +462,28 @@
             }
           });
         });
+
+        isInitialLoad = false;
       });
 
+      // Synchronize Messages & New Message Notification
       if (messagesListener) messagesListener.off();
       const messagesRef = roomRef.child("messages");
       messagesListener = messagesRef;
 
+      let initialMessagesLoaded = false;
+      messagesRef.once("value", () => {
+        initialMessagesLoaded = true;
+      });
+
       messagesRef.on("child_added", (snap) => {
-        appendMessage(snap.val());
+        const msg = snap.val();
+        appendMessage(msg);
+
+        // Notify if message is from another user and received live
+        if (initialMessagesLoaded && msg.sender !== currentUser) {
+          showNotification(`IPChat - ${msg.sender}`, msg.text);
+        }
       });
     }
 
